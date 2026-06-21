@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>vLLM 控制台</title>
+<style>
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background:#0f1117; color:#e6e6e6; margin:0; padding:24px; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .sub { color:#888; font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap:16px; }
+  .card { background:#1a1d27; border-radius:10px; padding:16px; border:1px solid #2a2e3a; }
+  .card.active { border-color:#4ade80; box-shadow:0 0 0 1px #4ade80 inset; }
+  .card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .card-head h3 { margin:0; font-size:15px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:10px; }
+  .b-stopped { background:#333; color:#aaa; }
+  .b-starting { background:#7c5e10; color:#ffd166; }
+  .b-running { background:#10402a; color:#4ade80; }
+  .b-error { background:#4a1414; color:#ff6b6b; }
+  .b-stopping { background:#333; color:#aaa; }
+  .meta { font-size:12px; color:#999; margin-bottom:10px; line-height:1.6; }
+  .gpu-row { display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:6px; }
+  .gpu-row input { transform: scale(1.1); }
+  .gpu-bar { flex:1; background:#2a2e3a; border-radius:4px; height:14px; position:relative; overflow:hidden; }
+  .gpu-bar-fill { height:100%; background:linear-gradient(90deg,#3b82f6,#60a5fa); }
+  .gpu-bar-label { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; color:#fff; }
+  .gpu-procs { font-size:10px; color:#777; margin-left:24px; margin-bottom:4px; }
+  label.small { font-size:12px; color:#aaa; display:block; margin:8px 0 2px; }
+  input[type=text] { width:100%; box-sizing:border-box; background:#0f1117; border:1px solid #333; color:#eee; padding:6px 8px; border-radius:6px; font-size:12px; }
+  .actions { display:flex; gap:8px; margin-top:10px; }
+  button { cursor:pointer; border:none; border-radius:6px; padding:7px 14px; font-size:13px; }
+  .btn-start { background:#3b82f6; color:#fff; }
+  .btn-stop { background:#444; color:#eee; }
+  .btn-log { background:transparent; color:#888; border:1px solid #333; }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+  pre.log { background:#000; color:#0f0; font-size:11px; padding:10px; max-height:200px; overflow:auto; border-radius:6px; margin-top:8px; display:none; }
+  .refresh-note { font-size:11px; color:#666; margin-top:20px; }
+</style>
+</head>
+<body>
+  <h1>vLLM 控制台</h1>
+  <div class="sub">同一时间只允许1台服务器对外提供服务;所有 /v1/* 请求会转发到当前激活的服务器</div>
+  <div id="grid" class="grid">加载中...</div>
+  <div class="refresh-note">每 5 秒自动刷新一次状态与GPU信息</div>
+
+<script>
+const grid = document.getElementById('grid');
+// 每台卡片的“选中GPU”本地状态,key=serverId, value=Set(index)
+const selectedGpus = {};
+// 每台卡片的输入框值缓存,避免刷新时打断用户正在编辑的内容
+const formCache = {};
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t);
+  }
+  return res.json();
+}
+
+function statusBadge(status) {
+  const map = { stopped:'已停止', starting:'启动中', running:'运行中', error:'异常', stopping:'停止中' };
+  return `<span class="badge b-${status}">${map[status] || status}</span>`;
+}
+
+function gpuBarColor(util) {
+  if (util > 80) return '#ef4444';
+  if (util > 40) return '#f59e0b';
+  return '#3b82f6';
+}
+
+function renderGpus(serverId, gpus) {
+  if (!gpus || gpus.length === 0) return '<div class="meta">GPU信息获取失败</div>';
+  if (gpus[0].error) return `<div class="meta">GPU查询出错: ${gpus[0].error}</div>`;
+  if (!selectedGpus[serverId]) selectedGpus[serverId] = new Set();
+  return gpus.map(g => {
+    const memPct = Math.round(g.mem_used_mb / g.mem_total_mb * 100);
+    const checked = selectedGpus[serverId].has(g.index) ? 'checked' : '';
+    const procText = g.processes && g.processes.length
+      ? g.processes.map(p => `pid${p.pid}:${p.mem_mb||'?'}MB`).join(', ')
+      : '空闲';
+    return `
+      <div class="gpu-row">
+        <input type="checkbox" data-server="${serverId}" data-gpu="${g.index}" ${checked} onchange="toggleGpu(this)">
+        <span style="width:32px">GPU${g.index}</span>
+        <div class="gpu-bar">
+          <div class="gpu-bar-fill" style="width:${memPct}%; background:${gpuBarColor(g.util_pct)}"></div>
+          <div class="gpu-bar-label">${g.mem_used_mb}/${g.mem_total_mb}MB · 利用率${g.util_pct}% · ${g.temp_c}°C</div>
+        </div>
+      </div>
+      <div class="gpu-procs">${procText}</div>
+    `;
+  }).join('');
+}
+
+function toggleGpu(el) {
+  const sid = el.dataset.server;
+  const idx = parseInt(el.dataset.gpu);
+  if (!selectedGpus[sid]) selectedGpus[sid] = new Set();
+  if (el.checked) selectedGpus[sid].add(idx); else selectedGpus[sid].delete(idx);
+}
+
+function cacheForm(sid) {
+  const model = document.getElementById(`model-${sid}`);
+  const extra = document.getElementById(`extra-${sid}`);
+  const port = document.getElementById(`port-${sid}`);
+  if (model) formCache[sid] = formCache[sid] || {};
+  if (model) formCache[sid].model = model.value;
+  if (extra) formCache[sid].extra = extra.value;
+  if (port) formCache[sid].port = port.value;
+}
+
+async function render() {
+  let serversData, gpusData;
+  try {
+    [serversData, gpusData] = await Promise.all([api('/api/servers'), api('/api/gpus')]);
+  } catch (e) {
+    grid.innerHTML = `<div class="meta">加载失败: ${e.message}</div>`;
+    return;
+  }
+
+  // 保存当前输入框内容,避免轮询刷新打断输入
+  serversData.servers.forEach(s => cacheForm(s.id));
+
+  grid.innerHTML = serversData.servers.map(s => {
+    const fc = formCache[s.id] || {};
+    const modelVal = fc.model !== undefined ? fc.model : s.default_model;
+    const extraVal = fc.extra !== undefined ? fc.extra : s.default_extra_args;
+    const portVal = fc.port !== undefined ? fc.port : s.vllm_port;
+    const disabledStart = s.status === 'starting' || s.status === 'stopping';
+    return `
+    <div class="card ${s.is_active ? 'active' : ''}">
+      <div class="card-head">
+        <h3>${s.name} ${s.is_active ? '⭐' : ''}</h3>
+        ${statusBadge(s.status)}
+      </div>
+      <div class="meta">
+        ${s.host}:${s.vllm_port}　|　当前模型: ${s.current_model || '-'}
+      </div>
+
+      ${renderGpus(s.id, gpusData[s.id])}
+
+      <label class="small">模型路径</label>
+      <input type="text" id="model-${s.id}" value="${modelVal}">
+      <label class="small">额外启动参数</label>
+      <input type="text" id="extra-${s.id}" value="${extraVal}">
+      <label class="small">端口</label>
+      <input type="text" id="port-${s.id}" value="${portVal}">
+
+      <div class="actions">
+        <button class="btn-start" ${disabledStart ? 'disabled' : ''} onclick="startServer('${s.id}')">启动 / 切换到此台</button>
+        <button class="btn-stop" onclick="stopServer('${s.id}')">停止</button>
+        <button class="btn-log" onclick="toggleLog('${s.id}')">日志</button>
+      </div>
+      <pre class="log" id="log-${s.id}"></pre>
+    </div>
+    `;
+  }).join('');
+}
+
+async function startServer(sid) {
+  const model = document.getElementById(`model-${sid}`).value;
+  const extra_args = document.getElementById(`extra-${sid}`).value;
+  const port = parseInt(document.getElementById(`port-${sid}`).value);
+  const gpus = Array.from(selectedGpus[sid] || []);
+  try {
+    await api(`/api/servers/${sid}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, extra_args, port, gpus: gpus.length ? gpus : undefined })
+    });
+    render();
+  } catch (e) {
+    alert('启动失败: ' + e.message);
+  }
+}
+
+async function stopServer(sid) {
+  try {
+    await api(`/api/servers/${sid}/stop`, { method: 'POST' });
+    render();
+  } catch (e) {
+    alert('停止失败: ' + e.message);
+  }
+}
+
+async function toggleLog(sid) {
+  const el = document.getElementById(`log-${sid}`);
+  if (el.style.display === 'block') { el.style.display = 'none'; return; }
+  const data = await api(`/api/servers/${sid}/logs?n=200`);
+  el.textContent = data.log || '(空)';
+  el.style.display = 'block';
+}
+
+render();
+setInterval(render, 5000);
+</script>
+</body>
+</html>
