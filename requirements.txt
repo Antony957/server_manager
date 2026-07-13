@@ -4,3 +4,4 @@ httpx
 paramiko
 pyyaml
 asyncssh
+psutil

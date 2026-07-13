@@ -135,6 +135,50 @@ class SSHManager:
                 return {"exit_code": -1, "stdout": "", "stderr": str(e)}
             raise
 
+    # ---------------------------------------------------------------------------
+    # 通用任务执行 (SSH + 命令行)
+    # ---------------------------------------------------------------------------
+    def run_task(self, command: str, log_path: str, gpus: list[int] | None = None) -> dict:
+        """
+        在远程服务器后台执行任意命令行任务，输出重定向到 log_path，并返回后台进程 PID。
+        用于「任务管理」模块：用户自由输入命令，经 SSH 在目标服务器拉起。
+        gpus: 可选，指定要使用的 GPU 编号，会在命令前注入 CUDA_VISIBLE_DEVICES 环境变量。
+        """
+        # 1. 先清空日志文件
+        self._exec(f"> {log_path}")
+
+        # 2. 卡号环境变量拼装（放在命令最前面）
+        env_prefix = ""
+        if gpus and len(gpus) > 0:
+            env_prefix = f"CUDA_VISIBLE_DEVICES={','.join(str(g) for g in gpus)} "
+
+        # 3. 用 nohup 后台运行，并通过 echo $! 捕获 PID
+        wrapped = f"source ~/.bashrc 2>/dev/null; nohup {env_prefix}{command} > {log_path} 2>&1 < /dev/null & echo $!"
+        full_cmd = f"bash -lc {shlex.quote(wrapped)}"
+        exit_code, out, err = self._exec(full_cmd)
+
+        # 取输出最后一行作为 PID
+        pid = ""
+        if out.strip():
+            pid = out.strip().splitlines()[-1].strip()
+        return {"exit_code": exit_code, "pid": pid, "stdout": out, "stderr": err}
+
+    def stop_task(self, pid: str) -> dict:
+        """根据 PID 强杀任务进程及其子进程 (用于「任务管理」停止功能)"""
+        if not pid:
+            return {"exit_code": -1, "stdout": "", "stderr": "无可用 PID"}
+        cmd = (
+            f"kill -9 -{pid} 2>/dev/null; "      # 杀掉整个进程组
+            f"kill -9 {pid} 2>/dev/null; "        # 兜底直杀
+            f"pkill -P {pid} 2>/dev/null; "       # 杀子进程
+            f"echo done"
+        )
+        try:
+            exit_code, out, err = self._exec(f"bash -lc {shlex.quote('source ~/.bashrc 2>/dev/null; ' + cmd)}")
+            return {"exit_code": exit_code, "stdout": out, "stderr": err}
+        except Exception as e:
+            return {"exit_code": -1, "stdout": "", "stderr": str(e)}
+
     def get_gpu_status(self) -> list[dict]:
         """用 nvidia-smi 查询每张卡的状态"""
         combined = (
@@ -203,3 +247,33 @@ class SSHManager:
             return out
         except Exception as e:
             return f"[读取日志失败: {e}]"
+
+    # ---------------------------------------------------------------------------
+    # 任务进程存活探测 + 远程文件下载
+    # ---------------------------------------------------------------------------
+    def is_process_alive(self, pid: str) -> bool:
+        """根据 PID 判断远程任务进程是否仍在运行"""
+        if not pid:
+            return False
+        cmd = f"kill -0 {pid} 2>/dev/null && echo ALIVE || echo DEAD"
+        try:
+            _, out, _ = self._exec(cmd)
+            return "ALIVE" in out
+        except Exception:
+            return False
+
+    def download_file(self, remote_path: str, local_path: str) -> bool:
+        """用 paramiko SFTP 把远程文件下载到本机"""
+        import os
+        client = self._connect()
+        try:
+            sftp = client.open_sftp()
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            sftp.get(remote_path, local_path)
+            sftp.close()
+            return True
+        except Exception as e:
+            print(f"[下载失败] {remote_path} -> {local_path}: {e}")
+            return False
+        finally:
+            client.close()

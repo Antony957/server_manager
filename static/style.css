@@ -1,0 +1,416 @@
+/* =====================================================================
+   style.css  —  全站共享样式
+   由 index.html / vllm.html / tasks.html 的内联 <style> 整理合并而来
+   ===================================================================== */
+
+/* ===== 基础 ===== */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Microsoft YaHei", sans-serif;
+  background: #0f1117;
+  color: #e6e6e6;
+}
+
+h1 {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.sub {
+  color: #888;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+/* 页面内边距：vllm / tasks 页面需要，外壳页面不需要 */
+.page-vllm,
+.page-tasks {
+  padding: 24px;
+}
+
+/* ===== 标签页外壳 (index.html) ===== */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  background: #161922;
+  border-bottom: 1px solid #2a2e3a;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.tab {
+  padding: 14px 22px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #888;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  color: #ccc;
+}
+
+.tab.active {
+  color: #4ade80;
+  border-bottom-color: #4ade80;
+}
+
+iframe {
+  width: 100%;
+  height: calc(100vh - 49px);
+  border: none;
+  background: #0f1117;
+}
+
+/* ===== 通用卡片 / 面板 ===== */
+.card,
+.panel {
+  background: #1a1d27;
+  border-radius: 10px;
+  padding: 16px;
+  border: 1px solid #2a2e3a;
+}
+
+.panel {
+  margin-bottom: 20px;
+}
+
+.card.active {
+  border-color: #4ade80;
+  box-shadow: 0 0 0 1px #4ade80 inset;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.card-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* ===== 网格 ===== */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 16px;
+}
+
+/* ===== 徽章 ===== */
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.b-stopped {
+  background: #333;
+  color: #aaa;
+}
+
+.b-running {
+  background: #10402a;
+  color: #4ade80;
+}
+
+.b-error {
+  background: #401010;
+  color: #f87171;
+}
+
+/* ===== 元信息 ===== */
+.meta {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 10px;
+  line-height: 1.6;
+}
+
+/* ===== GPU 状态 ===== */
+.gpu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.gpu-row input {
+  transform: scale(1.1);
+}
+
+.gpu-bar {
+  flex: 1;
+  background: #2a2e3a;
+  border-radius: 4px;
+  height: 14px;
+  position: relative;
+  overflow: hidden;
+}
+
+.gpu-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.gpu-bar-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #fff;
+}
+
+.gpu-procs {
+  font-size: 10px;
+  color: #777;
+  margin-left: 24px;
+  margin-bottom: 4px;
+}
+
+/* ===== 表单元素 ===== */
+label.small {
+  font-size: 12px;
+  color: #aaa;
+  display: block;
+  margin: 8px 0 2px;
+}
+
+label {
+  font-size: 12px;
+  color: #aaa;
+  display: block;
+  margin: 10px 0 4px;
+}
+
+select.model-select,
+.info-display {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0f1117;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.info-display {
+  background: #141620;
+  color: #888;
+  min-height: 28px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0f1117;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+select.log-select {
+  padding: 6px;
+  cursor: pointer;
+}
+
+/* ===== 按钮 ===== */
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+.btn-start {
+  background: #3b82f6;
+  color: #fff;
+  padding: 7px 14px;
+}
+
+.btn-stop {
+  background: #444;
+  color: #eee;
+}
+
+.btn-log {
+  background: transparent;
+  color: #888;
+  border: 1px solid #333;
+}
+
+.btn-primary {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== 日志面板 ===== */
+.log-panel {
+  margin-top: 24px;
+  background: #1a1d27;
+  border-radius: 10px;
+  border: 1px solid #2a2e3a;
+  padding: 16px;
+}
+
+.page-tasks .log-panel {
+  margin-top: 8px;
+}
+
+.log-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.log-panel-head span {
+  font-size: 13px;
+  color: #aaa;
+}
+
+pre#global-log,
+pre#task-log {
+  background: #000;
+  color: #0f0;
+  font-size: 11px;
+  padding: 10px;
+  height: 320px;
+  overflow: auto;
+  border-radius: 6px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+pre#task-log {
+  height: 300px;
+}
+
+/* ===== 任务表格 ===== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid #2a2e3a;
+}
+
+th {
+  color: #888;
+  font-weight: normal;
+  font-size: 12px;
+}
+
+.cmd-cell {
+  font-family: monospace;
+  color: #9ca3af;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== vLLM 启动配置弹框 ===== */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  margin: 10px 0 4px;
+  color: #ccc;
+}
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-box {
+  background: #1a1d27;
+  border: 1px solid #2a2e3a;
+  border-radius: 10px;
+  padding: 20px;
+  width: 440px;
+  max-width: 92vw;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.modal-head h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #e6e6e6;
+}
+
+.vllm-gpu-list {
+  background: #0f1117;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}

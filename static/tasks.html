@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+  <meta charset="UTF-8">
+  <title>任务管理</title>
+  <link id="theme-link" rel="stylesheet" href="style.css">
+</head>
+
+<body class="page-tasks">
+  <h1>任务管理</h1>
+  <div class="sub">先创建任务（写入数据库），再手动点击「开始」在远程服务器执行；结束后自动下载日志到本机</div>
+
+  <!-- 第一块：创建任务 -->
+  <div class="panel">
+    <label>任务名称</label>
+    <input id="task-name" placeholder="例如：训练任务 A">
+
+    <label>目标服务器</label>
+    <select id="task-server"></select>
+
+    <label>命令行 (将在远程服务器后台执行)</label>
+    <textarea id="task-command" placeholder="例如：python train.py --epochs 10"></textarea>
+
+    <label class="checkbox-row">
+      <input type="checkbox" id="task-is-vllm" style="width:auto;display:inline-block;margin-right:8px">
+      这是一个 vLLM 任务（启动前需先拉起 vLLM 服务）
+    </label>
+
+    <div class="btn-row">
+      <button class="btn-primary" onclick="submitTask()">创建任务</button>
+      <button class="btn-log" onclick="refreshTasks()">刷新列表</button>
+    </div>
+  </div>
+
+  <!-- 第二块：任务列表 -->
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>名称</th>
+          <th>服务器</th>
+          <th>命令</th>
+          <th>状态</th>
+          <th>创建时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="task-tbody">
+        <tr>
+          <td colspan="7" style="color:#666">加载中...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="log-panel">
+    <div class="log-panel-head">
+      <div>
+        <span>任务日志: </span>
+        <span id="task-log-title" style="color:#888;">未选择</span>
+        <span id="task-stream-tag" style="margin-left:10px; font-size:11px; color:#888;">[未连接]</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-primary" style="padding:4px 10px; font-size:12px;"
+          onclick="clickStartTaskStream()">开始串流</button>
+        <button class="btn-stop" style="padding:4px 10px; font-size:12px;" onclick="stopTaskStream()">断开串流</button>
+        <button class="btn-log" style="padding:4px 10px; font-size:12px;" onclick="clearTaskLog()">清空屏幕</button>
+      </div>
+    </div>
+    <pre id="task-log">请选择一条任务，并点击“开始串流”查看实时日志...</pre>
+  </div>
+
+  <!-- vLLM 启动配置弹框 -->
+  <div id="vllm-modal" class="modal-mask" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>配置 vLLM 启动参数</h3>
+        <span id="vllm-modal-task" style="font-size:12px;color:#888"></span>
+      </div>
+
+      <label class="small">选择 vLLM 服务器</label>
+      <select id="vllm-server" onchange="onVllmServerChange()"></select>
+
+      <label class="small">GPU 状态（勾选要使用的显卡）</label>
+      <div id="vllm-gpus" class="vllm-gpu-list">请选择服务器后刷新</div>
+      <button class="btn-log" style="margin-top:6px" onclick="refreshVllmGpus()">刷新 GPU</button>
+
+      <label class="small">选择要拉起的模型配置</label>
+      <select id="vllm-model" onchange="onVllmModelChange()"></select>
+
+      <label class="small">模型存储路径 (只读)</label>
+      <div class="info-display" id="vllm-path">-</div>
+
+      <label class="small">张量并行度 Tensor Parallel</label>
+      <input type="number" min="1" max="8" id="vllm-tp" value="1">
+
+      <label class="small">流水线并行度 Pipeline Parallel</label>
+      <input type="number" min="1" max="8" id="vllm-pp" value="1">
+
+      <label class="small">绑定运行端口 (只读)</label>
+      <div class="info-display" id="vllm-port">-</div>
+
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="confirmVllmStart()">确认启动</button>
+        <button class="btn-stop" onclick="closeVllmModal()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 普通任务 GPU 选择弹框 -->
+  <div id="gpu-modal" class="modal-mask" style="display:none">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>选择要使用的 GPU</h3>
+        <span id="gpu-modal-task" style="font-size:12px;color:#888"></span>
+      </div>
+
+      <label class="small">目标服务器: <span id="gpu-modal-server" style="color:#aaa"></span></label>
+      <label class="small">GPU 状态（勾选要使用的显卡）</label>
+      <div id="gpu-gpus" class="vllm-gpu-list">加载中...</div>
+      <button class="btn-log" style="margin-top:6px" onclick="refreshGpuList()">刷新 GPU</button>
+
+      <div class="modal-actions">
+        <button class="btn-primary" onclick="confirmGpuStart()">确认启动</button>
+        <button class="btn-stop" onclick="closeGpuModal()">取消</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+    // 根据 URL 参数 ?theme= 应用主题（由外壳页 index.html 控制）
+    (function applyThemeFromQuery() {
+      const params = new URLSearchParams(location.search);
+      const theme = params.get('theme');
+      if (theme === 'light') {
+        document.getElementById('theme-link').href = 'style-light.css';
+      }
+    })();
+
+    let cachedServers = [];
+    let cachedTasks = [];
+    let logSource = null;
+    let logTaskId = null;
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t);
+      }
+      return res.json();
+    }
+
+    function statusBadge(status) {
+      const map = { pending: '待开始', running: '运行中', stopped: '已停止', finished: '已完成', error: '启动失败', vllm_starting: 'vLLM拉起中' };
+      const text = map[status] || status;
+      const cls = map[status] ? status : 'stopped';
+      return `<span class="badge b-${cls}">${text}</span>`;
+    }
+
+    async function loadServers() {
+      const data = await api('/api/servers');
+      cachedServers = data.servers;
+      const sel = document.getElementById('task-server');
+      sel.innerHTML = cachedServers.map(s => `<option value="${s.id}">${s.name} (${s.host})</option>`).join('');
+    }
+
+    async function refreshTasks() {
+      const data = await api('/api/tasks');
+      cachedTasks = data.tasks;
+      const tbody = document.getElementById('task-tbody');
+      if (cachedTasks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="color:#666">暂无任务，请在上方创建</td></tr>';
+        return;
+      }
+      tbody.innerHTML = cachedTasks.map(t => {
+        const actions = [];
+        if (t.status === 'pending' || t.status === 'stopped' || t.status === 'error') {
+          actions.push(`<button class="btn-primary" style="padding:3px 8px;font-size:11px" onclick="startTask('${t.id}')">开始</button>`);
+        }
+        if (t.status === 'running') {
+          actions.push(`<button class="btn-stop" style="padding:3px 8px;font-size:11px" onclick="stopTask('${t.id}')">停止</button>`);
+        }
+        actions.push(`<button class="btn-log" style="padding:3px 8px;font-size:11px" onclick="viewTaskLog('${t.id}')">日志</button>`);
+        if (t.local_log_path) {
+          actions.push(`<a class="btn-log" style="padding:3px 8px;font-size:11px;text-decoration:none;display:inline-block" href="/api/tasks/${t.id}/log" target="_blank">下载</a>`);
+        }
+        return `
+    <tr>
+      <td>${t.id}</td>
+      <td>${t.name}</td>
+      <td>${t.server_name}</td>
+      <td class="cmd-cell" title="${t.command}">${t.command}</td>
+      <td>${statusBadge(t.status)}</td>
+      <td>${t.created_at}</td>
+      <td>${actions.join(' ')}</td>
+    </tr>`;
+      }).join('');
+    }
+
+async function submitTask() {
+  const name = document.getElementById('task-name').value.trim();
+  const server_id = document.getElementById('task-server').value;
+  const command = document.getElementById('task-command').value.trim();
+  const is_vllm = document.getElementById('task-is-vllm').checked;
+  if (!command) { alert('命令不能为空'); return; }
+  try {
+    await api('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, server_id, command, is_vllm })
+    });
+    document.getElementById('task-command').value = '';
+    document.getElementById('task-is-vllm').checked = false;
+    refreshTasks();
+  } catch (e) {
+    alert('创建失败: ' + e.message);
+  }
+}
+
+    async function startTask(taskId) {
+      const task = cachedTasks.find(t => t.id === taskId);
+      if (task && task.is_vllm) {
+        openVllmModal(taskId);
+        return;
+      }
+      // 普通任务：弹出 GPU 选择框，确认后带 CUDA_VISIBLE_DEVICES 限制启动
+      openGpuModal(taskId);
+    }
+
+    // ===== vLLM 启动配置弹框逻辑 =====
+    // 注意：弹框中选择的「vLLM 服务器」与任务创建时填写的「目标服务器（执行命令的服务器）」可以不同，
+    // 后端会先在 vLLM 服务器拉起服务，就绪后再到任务绑定的服务器执行目标命令。
+    let vllmModalTaskId = null;
+    let vllmSelectedGpus = new Set();
+    let vllmCachedModels = [];
+
+    function openVllmModal(taskId) {
+      vllmModalTaskId = taskId;
+      vllmSelectedGpus = new Set();
+      document.getElementById('vllm-modal-task').textContent = '任务: ' + taskId;
+      const sel = document.getElementById('vllm-server');
+      sel.innerHTML = cachedServers.map(s => `<option value="${s.id}">${s.name} (${s.host})</option>`).join('');
+      document.getElementById('vllm-gpus').innerHTML = '请选择服务器后刷新';
+      document.getElementById('vllm-model').innerHTML = '<option>请先选择服务器</option>';
+      document.getElementById('vllm-path').textContent = '-';
+      document.getElementById('vllm-port').textContent = '-';
+      document.getElementById('vllm-tp').value = 1;
+      document.getElementById('vllm-pp').value = 1;
+      document.getElementById('vllm-modal').style.display = 'flex';
+      onVllmServerChange();
+    }
+
+    function closeVllmModal() {
+      document.getElementById('vllm-modal').style.display = 'none';
+      vllmModalTaskId = null;
+    }
+
+    async function onVllmServerChange() {
+      const sid = document.getElementById('vllm-server').value;
+      const server = cachedServers.find(s => s.id === sid);
+      vllmCachedModels = server ? (server.models || []) : [];
+      const modelSel = document.getElementById('vllm-model');
+      modelSel.innerHTML = vllmCachedModels.map((m, i) => `<option value="${i}">${m.name}</option>`).join('');
+      onVllmModelChange();
+      await refreshVllmGpus();
+    }
+
+    function onVllmModelChange() {
+      const idx = parseInt(document.getElementById('vllm-model').value) || 0;
+      const m = vllmCachedModels[idx];
+      if (!m) return;
+      document.getElementById('vllm-path').textContent = m.vllm_config.model;
+      document.getElementById('vllm-port').textContent = m.vllm_config.port;
+      document.getElementById('vllm-tp').value = m.tensor_parallel_size || 1;
+      document.getElementById('vllm-pp').value = m.pipeline_parallel_size || 1;
+    }
+
+    async function refreshVllmGpus() {
+      const sid = document.getElementById('vllm-server').value;
+      if (!sid) return;
+      try {
+        const data = await api(`/api/servers/${sid}/gpus`);
+        renderVllmGpus(sid, data.gpus);
+      } catch (e) {
+        document.getElementById('vllm-gpus').innerHTML = '<div class="meta">GPU 查询失败: ' + e.message + '</div>';
+      }
+    }
+
+    function renderVllmGpus(sid, gpus) {
+      const box = document.getElementById('vllm-gpus');
+      if (!gpus || gpus.length === 0) { box.innerHTML = '<div class="meta">GPU 信息获取失败</div>'; return; }
+      if (gpus[0] && gpus[0].error) { box.innerHTML = `<div class="meta">GPU查询出错: ${gpus[0].error}</div>`; return; }
+      box.innerHTML = gpus.map(g => {
+        const memPct = Math.round(g.mem_used_mb / g.mem_total_mb * 100);
+        const checked = vllmSelectedGpus.has(g.index) ? 'checked' : '';
+        const procText = g.processes && g.processes.length
+          ? g.processes.map(p => `pid${p.pid}:${p.mem_mb||'?'}MB`).join(', ')
+          : '空闲';
+        return `
+          <div class="gpu-row">
+            <input type="checkbox" data-gpu="${g.index}" ${checked} onchange="toggleVllmGpu(this)">
+            <span style="width:32px">GPU${g.index}</span>
+            <div class="gpu-bar">
+              <div class="gpu-bar-fill" style="width:${memPct}%; background:${memPct>80?'#ef4444':memPct>40?'#f59e0b':'#3b82f6'}"></div>
+              <div class="gpu-bar-label">${g.mem_used_mb}/${g.mem_total_mb}MB · 利用率${g.util_pct}% · ${g.temp_c}°C</div>
+            </div>
+          </div>
+          <div class="gpu-procs">${procText}</div>
+        `;
+      }).join('');
+    }
+
+    function toggleVllmGpu(el) {
+      const idx = parseInt(el.dataset.gpu);
+      if (el.checked) vllmSelectedGpus.add(idx); else vllmSelectedGpus.delete(idx);
+    }
+
+    async function confirmVllmStart() {
+      if (!vllmModalTaskId) return;
+      const server_id = document.getElementById('vllm-server').value;
+      const model_index = parseInt(document.getElementById('vllm-model').value) || 0;
+      const tp = parseInt(document.getElementById('vllm-tp').value) || 1;
+      const pp = parseInt(document.getElementById('vllm-pp').value) || 1;
+      const gpus = Array.from(vllmSelectedGpus).sort((a, b) => a - b);
+      const payload = {
+        vllm_config: { server_id, model_index, gpus, tensor_parallel_size: tp, pipeline_parallel_size: pp }
+      };
+      closeVllmModal();
+      try {
+        await api(`/api/tasks/${vllmModalTaskId}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        refreshTasks();
+      } catch (e) {
+        alert('启动失败: ' + e.message);
+      }
+    }
+
+    // ===== 普通任务 GPU 选择弹框逻辑 =====
+    let gpuModalTaskId = null;
+    let gpuSelectedGpus = new Set();
+
+    function openGpuModal(taskId) {
+      const task = cachedTasks.find(t => t.id === taskId);
+      if (!task) return;
+      gpuModalTaskId = taskId;
+      gpuSelectedGpus = new Set();
+      document.getElementById('gpu-modal-task').textContent = '任务: ' + taskId;
+      document.getElementById('gpu-modal-server').textContent = task.server_name || task.server_id;
+      document.getElementById('gpu-modal').style.display = 'flex';
+      refreshGpuList();
+    }
+
+    function closeGpuModal() {
+      document.getElementById('gpu-modal').style.display = 'none';
+      gpuModalTaskId = null;
+    }
+
+    async function refreshGpuList() {
+      const task = cachedTasks.find(t => t.id === gpuModalTaskId);
+      if (!task) return;
+      const sid = task.server_id;
+      try {
+        const data = await api(`/api/servers/${sid}/gpus`);
+        renderGpuList(sid, data.gpus);
+      } catch (e) {
+        document.getElementById('gpu-gpus').innerHTML = '<div class="meta">GPU 查询失败: ' + e.message + '</div>';
+      }
+    }
+
+    function renderGpuList(sid, gpus) {
+      const box = document.getElementById('gpu-gpus');
+      if (!gpus || gpus.length === 0) { box.innerHTML = '<div class="meta">GPU 信息获取失败</div>'; return; }
+      if (gpus[0] && gpus[0].error) { box.innerHTML = `<div class="meta">GPU查询出错: ${gpus[0].error}</div>`; return; }
+      box.innerHTML = gpus.map(g => {
+        const memPct = Math.round(g.mem_used_mb / g.mem_total_mb * 100);
+        const checked = gpuSelectedGpus.has(g.index) ? 'checked' : '';
+        const procText = g.processes && g.processes.length
+          ? g.processes.map(p => `pid${p.pid}:${p.mem_mb||'?'}MB`).join(', ')
+          : '空闲';
+        return `
+          <div class="gpu-row">
+            <input type="checkbox" data-gpu="${g.index}" ${checked} onchange="toggleGpu(this)">
+            <span style="width:32px">GPU${g.index}</span>
+            <div class="gpu-bar">
+              <div class="gpu-bar-fill" style="width:${memPct}%; background:${memPct>80?'#ef4444':memPct>40?'#f59e0b':'#3b82f6'}"></div>
+              <div class="gpu-bar-label">${g.mem_used_mb}/${g.mem_total_mb}MB · 利用率${g.util_pct}% · ${g.temp_c}°C</div>
+            </div>
+          </div>
+          <div class="gpu-procs">${procText}</div>
+        `;
+      }).join('');
+    }
+
+    function toggleGpu(el) {
+      const idx = parseInt(el.dataset.gpu);
+      if (el.checked) gpuSelectedGpus.add(idx); else gpuSelectedGpus.delete(idx);
+    }
+
+    async function confirmGpuStart() {
+      if (!gpuModalTaskId) return;
+      const gpus = Array.from(gpuSelectedGpus).sort((a, b) => a - b);
+      closeGpuModal();
+      try {
+        await api(`/api/tasks/${gpuModalTaskId}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gpus })
+        });
+        refreshTasks();
+      } catch (e) {
+        alert('启动失败: ' + e.message);
+      }
+    }
+
+    async function stopTask(taskId) {
+      if (!confirm('确认停止该任务？')) return;
+      try {
+        await api(`/api/tasks/${taskId}/stop`, { method: 'POST' });
+        refreshTasks();
+      } catch (e) {
+        alert('停止失败: ' + e.message);
+      }
+    }
+
+    function viewTaskLog(taskId) {
+      document.getElementById('task-log-title').textContent = taskId;
+      clickStartTaskStream();
+    }
+
+    function startTaskStream(taskId) {
+      if (logSource) { logSource.close(); logSource = null; }
+      logTaskId = taskId;
+      document.getElementById('task-log-title').textContent = taskId;
+
+      const tag = document.getElementById('task-stream-tag');
+      tag.textContent = '[正在连接...]';
+      tag.style.color = '#f59e0b';
+
+      const el = document.getElementById('task-log');
+      el.textContent = `=== 正在连接任务 [${taskId}] 的远程日志流 ===\n`;
+
+      const es = new EventSource(`/api/tasks/${taskId}/logs/stream`);
+      logSource = es;
+
+      es.onopen = () => { tag.textContent = '[已连接]'; tag.style.color = '#4ade80'; };
+      es.onmessage = e => { el.textContent += e.data + '\n'; el.scrollTop = el.scrollHeight; };
+      es.onerror = () => {
+        el.textContent += '\n[错误: 日志流连接断开]\n';
+        stopTaskStream();
+      };
+    }
+
+    function clickStartTaskStream() {
+      const tid = logTaskId || (cachedTasks[0] && cachedTasks[0].id);
+      if (!tid) { alert('请先选择一条任务！'); return; }
+      startTaskStream(tid);
+    }
+
+    function stopTaskStream() {
+      if (logSource) { logSource.close(); logSource = null; }
+      const tag = document.getElementById('task-stream-tag');
+      tag.textContent = '[已断开]';
+      tag.style.color = '#ef4444';
+      document.getElementById('task-log').textContent += '\n=== 串流已主动断开 ===\n';
+    }
+
+    function clearTaskLog() { document.getElementById('task-log').textContent = ''; }
+
+    async function init() {
+      await loadServers();
+      await refreshTasks();
+    }
+    init();
+  </script>
+</body>
+
+</html>

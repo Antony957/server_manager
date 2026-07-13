@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>vllm管理</title>
+<link id="theme-link" rel="stylesheet" href="style.css">
+</head>
+<body class="page-vllm">
+  <h1>vllm管理</h1>
+  <div class="sub">同一时间只允许1台服务器对外提供服务;所有 /v1/* 请求会转发到当前激活的服务器</div>
+  <button class="btn-log" onclick="refreshAll()" style="margin-bottom:16px">刷新状态</button>
+  <div id="grid" class="grid">加载中...</div>
+
+  <div class="log-panel" id="log-panel">
+    <div class="log-panel-head">
+      <div>
+        <span>查看服务器: </span>
+        <select id="log-server-select" class="log-select" onchange="handleSelectServerChange()">
+          <option value="">-- 请选择服务器 --</option>
+        </select>
+        <span id="stream-status-tag" style="margin-left:10px; font-size:11px; color:#888;">[未连接]</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-start" style="padding:4px 10px; font-size:12px;" onclick="clickStartStream()">开始串流</button>
+        <button class="btn-stop" style="padding:4px 10px; font-size:12px;" onclick="stopLogStream()">断开串流</button>
+        <button class="btn-log" style="padding:4px 10px; font-size:12px;" onclick="clearLog()">清空屏幕</button>
+      </div>
+    </div>
+    <pre id="global-log">请在上方选择一台服务器，并点击“开始串流”查看实时日志...</pre>
+  </div>
+
+<script>
+// 根据 URL 参数 ?theme= 应用主题（由外壳页 index.html 控制）
+(function applyThemeFromQuery() {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get('theme');
+  if (theme === 'light') {
+    document.getElementById('theme-link').href = 'style-light.css';
+  }
+})();
+
+let cachedServers = { servers: [], active_server: null };
+let cachedGpus = {};
+let logSource = null;
+let logServerId = null;
+
+const grid = document.getElementById('grid');
+const selectedGpus = {};
+const formCache = {}; // 缓存各台服务器当前选中的模型索引号
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t);
+  }
+  return res.json();
+}
+
+function statusBadge(status) {
+  const map = { stopped:'已停止', running:'运行中' };
+  const text = map[status] || '已停止';
+  const badgeClass = map[status] ? status : 'stopped';
+  return `<span class="badge b-${badgeClass}">${text}</span>`;
+}
+
+function gpuBarColor(util) {
+  if (util > 80) return '#ef4444';
+  if (util > 40) return '#f59e0b';
+  return '#3b82f6';
+}
+
+function renderGpus(serverId, gpus) {
+  if (!gpus) return '<div class="meta" style="color:#555;font-size:11px">GPU 未加载，点击刷新</div>';
+  if (gpus.length === 0) return '<div class="meta">GPU信息获取失败</div>';
+  if (gpus[0] && gpus[0].error) return `<div class="meta">GPU查询出错: ${gpus[0].error}</div>`;
+  if (!selectedGpus[serverId]) selectedGpus[serverId] = new Set();
+  return gpus.map(g => {
+    const memPct = Math.round(g.mem_used_mb / g.mem_total_mb * 100);
+    const checked = selectedGpus[serverId].has(g.index) ? 'checked' : '';
+    const procText = g.processes && g.processes.length
+      ? g.processes.map(p => `pid${p.pid}:${p.mem_mb||'?'}MB`).join(', ')
+      : '空闲';
+    return `
+      <div class="gpu-row">
+        <input type="checkbox" data-server="${serverId}" data-gpu="${g.index}" ${checked} onchange="toggleGpu(this)">
+        <span style="width:32px">GPU${g.index}</span>
+        <div class="gpu-bar">
+          <div class="gpu-bar-fill" style="width:${memPct}%; background:${gpuBarColor(g.util_pct)}"></div>
+          <div class="gpu-bar-label">${g.mem_used_mb}/${g.mem_total_mb}MB · 利用率${g.util_pct}% · ${g.temp_c}°C</div>
+        </div>
+      </div>
+      <div class="gpu-procs">${procText}</div>
+    `;
+  }).join('');
+}
+
+function toggleGpu(el) {
+  const sid = el.dataset.server;
+  const idx = parseInt(el.dataset.gpu);
+  if (!selectedGpus[sid]) selectedGpus[sid] = new Set();
+  if (el.checked) selectedGpus[sid].add(idx); else selectedGpus[sid].delete(idx);
+}
+
+// 缓存选中的下拉列表位置
+function cacheForm(sid) {
+  const select = document.getElementById(`model-select-${sid}`);
+  if (!select) return;
+  formCache[sid] = select.selectedIndex;
+}
+
+// 模型下拉框变动事件：实时刷纸面只读配置展示
+function onModelSelectChange(sid, idx, modelsJson) {
+  formCache[sid] = parseInt(idx);
+  const models = JSON.parse(decodeURIComponent(modelsJson));
+  const selected = models[idx];
+
+  document.getElementById(`path-display-${sid}`).textContent = selected.vllm_config.model;
+  document.getElementById(`tp-input-${sid}`).value = selected.tensor_parallel_size;
+  document.getElementById(`pp-input-${sid}`).value = selected.pipeline_parallel_size;
+  document.getElementById(`port-display-${sid}`).textContent = selected.vllm_config.port;
+}
+
+async function refreshGpus(sid) {
+  const data = await api(`/api/servers/${sid}/gpus`);
+  cachedGpus[sid] = data.gpus;
+  render();
+}
+
+async function refreshAllGpus() {
+  const data = await api('/api/gpus');
+  cachedGpus = data;
+  render();
+}
+
+let serverStatusTimer = null;
+async function refreshServers() {
+  cachedServers = await api('/api/servers');
+  updateLogSelectOptions();
+  render();
+
+  // 自动化智能轮询：检查当前激活的实例状态是否依旧是 stopped
+  const activeServerId = cachedServers.active_server;
+  const activeServer = cachedServers.servers.find(s => s.id === activeServerId);
+  const isWaitingForOnline = activeServer && activeServer.status === 'stopped';
+
+  if (isWaitingForOnline) {
+    if (!serverStatusTimer) {
+      console.log("[🔄 轮询激活] 检测到大模型在后台读模，开启每3秒追踪...");
+      serverStatusTimer = setInterval(async () => {
+        cachedServers = await api('/api/servers');
+        render();
+        const currentActive = cachedServers.servers.find(s => s.id === cachedServers.active_server);
+        if (!currentActive || currentActive.status === 'running') {
+          console.log("[✅ 轮询解除] 大模型已就绪或切换，关闭追踪。");
+          clearInterval(serverStatusTimer);
+          serverStatusTimer = null;
+        }
+      }, 3000);
+    }
+  } else {
+    if (serverStatusTimer) {
+      clearInterval(serverStatusTimer);
+      serverStatusTimer = null;
+    }
+  }
+}
+
+function updateLogSelectOptions() {
+  const select = document.getElementById('log-server-select');
+  const currentVal = select.value;
+  select.innerHTML = '<option value="">-- 请选择服务器 --</option>' +
+    cachedServers.servers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  if (cachedServers.servers.some(s => s.id === currentVal)) {
+    select.value = currentVal;
+  }
+}
+
+function handleSelectServerChange() {
+  const sid = document.getElementById('log-server-select').value;
+  if (!sid) { stopLogStream(); return; }
+  if (logSource) { clickStartStream(); }
+}
+
+function render() {
+  // 渲染前强制拦截保存一下当前的下拉框的选择位置，防重构时重置
+  cachedServers.servers.forEach(s => {
+    const el = document.getElementById(`model-select-${s.id}`);
+    if (el) formCache[s.id] = el.selectedIndex;
+  });
+
+  grid.innerHTML = cachedServers.servers.map(s => {
+    const models = s.models || [];
+    const savedIdx = formCache[s.id] !== undefined ? formCache[s.id] : 0;
+
+    // 生成动态下拉模板
+    const optionsHtml = models.map((m, index) =>
+      `<option value="${index}" ${index === savedIdx ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+
+    const currentModel = models[savedIdx] || { tensor_parallel_size: '-', pipeline_parallel_size: '-', vllm_config: { model: '-', port: '-' } };
+    const modelsJson = encodeURIComponent(JSON.stringify(models));
+    const disabledStart = s.status === 'running';
+    const isActive = cachedServers.active_server === s.id;
+
+    return `
+    <div class="card ${isActive ? 'active' : ''}">
+      <div class="card-head">
+        <h3>${s.name} ${isActive ? '⭐' : ''}</h3>
+        ${statusBadge(s.status)}
+      </div>
+      <div class="meta">
+        ${s.host}:${s.vllm_port} | 正在运行: ${s.current_model || '无'}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#888">GPU 状态</span>
+        <button class="btn-log" onclick="refreshGpus('${s.id}')">刷新 GPU</button>
+      </div>
+      ${renderGpus(s.id, cachedGpus[s.id])}
+
+      <label class="small">选择要拉起的模型配置</label>
+      <select id="model-select-${s.id}" class="model-select" onchange="onModelSelectChange('${s.id}', this.value, '${modelsJson}')">
+        ${optionsHtml}
+      </select>
+
+      <label class="small">模型存储路径 (只读)</label>
+      <div class="info-display" id="path-display-${s.id}">${currentModel.vllm_config.model}</div>
+
+      <label class="small">张量并行度 Tensor Parallel</label>
+      <input type="number" min="1" max="8" id="tp-input-${s.id}"
+             value="${currentModel.tensor_parallel_size}">
+
+      <label class="small">流水线并行度 Pipeline Parallel</label>
+      <input type="number" min="1" max="8" id="pp-input-${s.id}"
+             value="${currentModel.pipeline_parallel_size}">
+
+      <label class="small">绑定运行端口 (只读)</label>
+      <div class="info-display" id="port-display-${s.id}">${currentModel.vllm_config.port}</div>
+
+      <div class="actions">
+        <button class="btn-start" ${disabledStart ? 'disabled' : ''} onclick="startServer('${s.id}')">启动 / 切换到此台</button>
+        <button class="btn-stop" onclick="stopServer('${s.id}')">停止</button>
+      </div>
+    </div>
+    `;
+  }).join('');
+}
+
+function startLogStream(sid) {
+  if (logSource) { logSource.close(); logSource = null; }
+
+  logServerId = sid;
+  document.getElementById('log-server-select').value = sid;
+
+  const statusTag = document.getElementById('stream-status-tag');
+  statusTag.textContent = '[正在连接...]';
+  statusTag.style.color = '#f59e0b';
+
+  const el = document.getElementById('global-log');
+  el.textContent = `=== 正在连接到服务器 [${sid}] 的远程日志流 ===\n`;
+
+  const es = new EventSource(`/api/servers/${sid}/logs/stream`);
+  logSource = es;
+
+  es.onopen = () => {
+    statusTag.textContent = '[已连接]';
+    statusTag.style.color = '#4ade80';
+  };
+
+  es.onmessage = e => {
+    el.textContent += e.data + '\n';
+    el.scrollTop = el.scrollHeight;
+  };
+
+  es.onerror = () => {
+    el.textContent += '\n[错误: 日志流连接断开，服务器可能未启动或正在重启]\n';
+    stopLogStream();
+  };
+}
+
+function clickStartStream() {
+  const sid = document.getElementById('log-server-select').value;
+  if (!sid) { alert('请先选择一台服务器！'); return; }
+  startLogStream(sid);
+}
+
+function stopLogStream() {
+  if (logSource) { logSource.close(); logSource = null; }
+  const statusTag = document.getElementById('stream-status-tag');
+  statusTag.textContent = '[已断开]';
+  statusTag.style.color = '#ef4444';
+  const el = document.getElementById('global-log');
+  el.textContent += '\n=== 串流已主动断开 ===\n';
+}
+
+function clearLog() { document.getElementById('global-log').textContent = ''; }
+
+async function startServer(sid) {
+  const selectEl = document.getElementById(`model-select-${sid}`);
+  if (!selectEl) return;
+
+  const gpus = Array.from(selectedGpus[sid] || []);
+  const customTp = parseInt(document.getElementById(`tp-input-${sid}`).value) || 1;
+  const customPp = parseInt(document.getElementById(`pp-input-${sid}`).value) || 1;
+  // 联动：点击启动秒开日志监听，不管状态变没变绿
+  startLogStream(sid);
+  try {
+    await api(`/api/servers/${sid}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // 核心调整：发送被拉拉列表选中的 index 标志位和勾选的卡数组
+      body: JSON.stringify({
+        model_index: selectEl.selectedIndex,
+        gpus: gpus,
+        tensor_parallel_size: customTp,
+        pipeline_parallel_size: customPp
+      })
+    });
+    refreshServers();
+  } catch (e) {
+    alert('启动失败: ' + e.message);
+  }
+}
+
+async function stopServer(sid) {
+  try {
+    await api(`/api/servers/${sid}/stop`, { method: 'POST' });
+    if (logServerId === sid) { stopLogStream(); }
+    refreshServers();
+  } catch (e) {
+    alert('停止失败: ' + e.message);
+  }
+}
+
+async function refreshAll() {
+  if (serverStatusTimer) { clearInterval(serverStatusTimer); serverStatusTimer = null; }
+  await Promise.all([refreshServers(), refreshAllGpus()]);
+}
+
+refreshAll();
+</script>
+</body>
+</html>
