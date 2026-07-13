@@ -11,4 +11,4 @@ echo "==== 正在启动 FastAPI 应用 ===="
 #    - main:app 代表执行 main.py 里的 app = FastAPI() 对象（根据你实际的文件名修改）
 #    - --host 0.0.0.0 让服务监听所有网卡
 #    - --port 8000 是你网页服务运行的端口
-exec "${VENV_BIN}/uvicorn" main:app --host 0.0.0.0 --port 8000
+exec ./venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
