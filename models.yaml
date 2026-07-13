@@ -67,7 +67,7 @@ models:
       dtype: "bfloat16"
       trust-remote-code: true
       gpu_memory_utilization: 0.9
-      max-model-len: 8192
+      max-model-len: 4096
       enable-log-requests: true
 
   - id: llava_1_6_vicuna_7b
@@ -83,7 +83,7 @@ models:
       dtype: "bfloat16"
       trust-remote-code: true
       gpu_memory_utilization: 0.9
-      max-model-len: 8192
+      max-model-len: 4096
       enable-log-requests: true
 
   - id: phi4_multimodal
@@ -100,4 +100,53 @@ models:
       trust-remote-code: true
       gpu_memory_utilization: 0.9
       max-model-len: 8192
+      enable-log-requests: true
+
+  - id: deepseek-vl3
+    name: "deepseek-vl3"
+    tensor_parallel_size: 4
+    pipeline_parallel_size: 1
+    vllm_config:
+      model: "/Data_share/chongwen/.local/modelscope/Deepseek-vl2"
+      host: "0.0.0.0"
+      port: 33261
+      uvicorn-log-level: "info"
+      api-key: "token-abc123"
+      dtype: "bfloat16"
+      trust-remote-code: true
+      gpu_memory_utilization: 0.9
+      max-model-len: 4096
+      enable-log-requests: true
+
+  - id: Vision-R1-7B
+    name: "Vision-R1-7B"
+    tensor_parallel_size: 2
+    pipeline_parallel_size: 1
+    vllm_config:
+      model: "Osilly/Vision-R1-7B"
+      host: "0.0.0.0"
+      port: 33261
+      uvicorn-log-level: "info"
+      api-key: "token-abc123"
+      dtype: "bfloat16"
+      trust-remote-code: true
+      gpu_memory_utilization: 0.9
+      max-model-len: 4096
+      enable-log-requests: true
+
+
+  - id: Qwen2.5-VL-32B
+    name: "Qwen2.5-VL-32B"
+    tensor_parallel_size: 4
+    pipeline_parallel_size: 1
+    vllm_config:
+      model: "/Data_share/chongwen/.local/modelscope/Qwen2.5-VL-32B-Instruct"
+      host: "0.0.0.0"
+      port: 33261
+      uvicorn-log-level: "info"
+      api-key: "token-abc123"
+      dtype: "bfloat16"
+      trust-remote-code: true
+      gpu_memory_utilization: 0.9
+      max-model-len: 4096
       enable-log-requests: true

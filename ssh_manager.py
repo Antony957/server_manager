@@ -120,9 +120,11 @@ class SSHManager:
         cmd = (
             f"PID=$(ss -tlnp | grep -E ':{port} ' | grep -E 'python|vllm' | awk '{{print $NF}}' | cut -d, -f2 | cut -d= -f2); "
             f"if [ ! -z \"$PID\" ]; then "
-            f"  kill $PID 2>/dev/null; "
-            f"  sleep 3; "
-            f"  kill -9 $PID 2>/dev/null; "
+            f"  if [ \"$(ps -o user= -p $PID 2>/dev/null)\" = \"chongwen\" ]; then "
+            f"    kill $PID 2>/dev/null; "
+            f"    sleep 3; "
+            f"    kill -9 $PID 2>/dev/null; "
+            f"  fi "
             f"fi"
         )
         try:

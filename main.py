@@ -10,7 +10,8 @@ import os
 import yaml
 import copy
 from pathlib import Path
-
+import psutil
+import socket
 import asyncssh
 import httpx
 from fastapi import FastAPI, Request, HTTPException
@@ -207,6 +208,22 @@ async def stop_server(server_id: str):
     except Exception as e:
         STATE["server_status"][server_id] = "stopped"
         raise HTTPException(500, f"停止失败: {e}")
+
+
+@app.get("/get_ip")
+async def get_ip():
+    ips = set()
+
+    for iface, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family == socket.AF_INET:  # IPv4
+                ips.add(addr.address)
+            elif addr.family == socket.AF_INET6:  # IPv6（可选）
+                ips.add(addr.address)
+
+    return {
+        "ips": list(ips)
+    }
 
 
 @app.get("/api/servers/{server_id}/logs/stream")
