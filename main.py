@@ -667,4 +667,4 @@ async def _download_task_log(task_id: str):
 # ---------------------------------------------------------------------------
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+app.mount("/index", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
