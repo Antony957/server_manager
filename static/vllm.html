@@ -122,20 +122,20 @@ function onModelSelectChange(sid, idx, modelsJson) {
 }
 
 async function refreshGpus(sid) {
-  const data = await api(`/api/servers/${sid}/gpus`);
+  const data = await api(`api/servers/${sid}/gpus`);
   cachedGpus[sid] = data.gpus;
   render();
 }
 
 async function refreshAllGpus() {
-  const data = await api('/api/gpus');
+  const data = await api('api/gpus');
   cachedGpus = data;
   render();
 }
 
 let serverStatusTimer = null;
 async function refreshServers() {
-  cachedServers = await api('/api/servers');
+  cachedServers = await api('api/servers');
   updateLogSelectOptions();
   render();
 
@@ -148,7 +148,7 @@ async function refreshServers() {
     if (!serverStatusTimer) {
       console.log("[🔄 轮询激活] 检测到大模型在后台读模，开启每3秒追踪...");
       serverStatusTimer = setInterval(async () => {
-        cachedServers = await api('/api/servers');
+        cachedServers = await api('api/servers');
         render();
         const currentActive = cachedServers.servers.find(s => s.id === cachedServers.active_server);
         if (!currentActive || currentActive.status === 'running') {
@@ -260,7 +260,7 @@ function startLogStream(sid) {
   const el = document.getElementById('global-log');
   el.textContent = `=== 正在连接到服务器 [${sid}] 的远程日志流 ===\n`;
 
-  const es = new EventSource(`/api/servers/${sid}/logs/stream`);
+  const es = new EventSource(`api/servers/${sid}/logs/stream`);
   logSource = es;
 
   es.onopen = () => {
@@ -306,7 +306,7 @@ async function startServer(sid) {
   // 联动：点击启动秒开日志监听，不管状态变没变绿
   startLogStream(sid);
   try {
-    await api(`/api/servers/${sid}/start`, {
+    await api(`api/servers/${sid}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // 核心调整：发送被拉拉列表选中的 index 标志位和勾选的卡数组
@@ -325,7 +325,7 @@ async function startServer(sid) {
 
 async function stopServer(sid) {
   try {
-    await api(`/api/servers/${sid}/stop`, { method: 'POST' });
+    await api(`api/servers/${sid}/stop`, { method: 'POST' });
     if (logServerId === sid) { stopLogStream(); }
     refreshServers();
   } catch (e) {

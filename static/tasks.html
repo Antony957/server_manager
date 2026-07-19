@@ -161,14 +161,14 @@
     }
 
     async function loadServers() {
-      const data = await api('/api/servers');
+      const data = await api('api/servers');
       cachedServers = data.servers;
       const sel = document.getElementById('task-server');
       sel.innerHTML = cachedServers.map(s => `<option value="${s.id}">${s.name} (${s.host})</option>`).join('');
     }
 
     async function refreshTasks() {
-      const data = await api('/api/tasks');
+      const data = await api('api/tasks');
       cachedTasks = data.tasks;
       const tbody = document.getElementById('task-tbody');
       if (cachedTasks.length === 0) {
@@ -185,7 +185,7 @@
         }
         actions.push(`<button class="btn-log" style="padding:3px 8px;font-size:11px" onclick="viewTaskLog('${t.id}')">日志</button>`);
         if (t.local_log_path) {
-          actions.push(`<a class="btn-log" style="padding:3px 8px;font-size:11px;text-decoration:none;display:inline-block" href="/api/tasks/${t.id}/log" target="_blank">下载</a>`);
+          actions.push(`<a class="btn-log" style="padding:3px 8px;font-size:11px;text-decoration:none;display:inline-block" href="api/tasks/${t.id}/log" target="_blank">下载</a>`);
         }
         return `
     <tr>
@@ -207,7 +207,7 @@ async function submitTask() {
   const is_vllm = document.getElementById('task-is-vllm').checked;
   if (!command) { alert('命令不能为空'); return; }
   try {
-    await api('/api/tasks', {
+    await api('api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, server_id, command, is_vllm })
@@ -282,7 +282,7 @@ async function submitTask() {
       const sid = document.getElementById('vllm-server').value;
       if (!sid) return;
       try {
-        const data = await api(`/api/servers/${sid}/gpus`);
+        const data = await api(`api/servers/${sid}/gpus`);
         renderVllmGpus(sid, data.gpus);
       } catch (e) {
         document.getElementById('vllm-gpus').innerHTML = '<div class="meta">GPU 查询失败: ' + e.message + '</div>';
@@ -330,7 +330,7 @@ async function submitTask() {
       };
       closeVllmModal();
       try {
-        await api(`/api/tasks/${vllmModalTaskId}/start`, {
+        await api(`api/tasks/${vllmModalTaskId}/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -366,7 +366,7 @@ async function submitTask() {
       if (!task) return;
       const sid = task.server_id;
       try {
-        const data = await api(`/api/servers/${sid}/gpus`);
+        const data = await api(`api/servers/${sid}/gpus`);
         renderGpuList(sid, data.gpus);
       } catch (e) {
         document.getElementById('gpu-gpus').innerHTML = '<div class="meta">GPU 查询失败: ' + e.message + '</div>';
@@ -407,7 +407,7 @@ async function submitTask() {
       const gpus = Array.from(gpuSelectedGpus).sort((a, b) => a - b);
       closeGpuModal();
       try {
-        await api(`/api/tasks/${gpuModalTaskId}/start`, {
+        await api(`api/tasks/${gpuModalTaskId}/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gpus })
@@ -421,7 +421,7 @@ async function submitTask() {
     async function stopTask(taskId) {
       if (!confirm('确认停止该任务？')) return;
       try {
-        await api(`/api/tasks/${taskId}/stop`, { method: 'POST' });
+        await api(`api/tasks/${taskId}/stop`, { method: 'POST' });
         refreshTasks();
       } catch (e) {
         alert('停止失败: ' + e.message);
@@ -445,7 +445,7 @@ async function submitTask() {
       const el = document.getElementById('task-log');
       el.textContent = `=== 正在连接任务 [${taskId}] 的远程日志流 ===\n`;
 
-      const es = new EventSource(`/api/tasks/${taskId}/logs/stream`);
+      const es = new EventSource(`api/tasks/${taskId}/logs/stream`);
       logSource = es;
 
       es.onopen = () => { tag.textContent = '[已连接]'; tag.style.color = '#4ade80'; };
