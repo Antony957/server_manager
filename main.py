@@ -14,6 +14,7 @@ import psutil
 import socket
 import asyncssh
 import httpx
+from fastapi.responses import RedirectResponse
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -62,6 +63,12 @@ TASKS = {}
 TASK_SEQ = 0
 
 app = FastAPI(title="vLLM 智能控制台")
+
+# 1. 显式定义根目录的跳转逻辑
+@app.get("/")
+async def root_to_index():
+    # 当用户访问 http://域名/ 时，自动 307 重定向到 http://域名/index
+    return RedirectResponse(url="/index")
 
 # ---------------------------------------------------------------------------
 # 内部状态管理辅助工具
@@ -667,4 +674,4 @@ async def _download_task_log(task_id: str):
 # ---------------------------------------------------------------------------
 STATIC_DIR = BASE_DIR / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/index", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
