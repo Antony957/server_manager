@@ -62,13 +62,7 @@ STATE = {
 TASKS = {}
 TASK_SEQ = 0
 
-app = FastAPI(title="vLLM 智能控制台")
-
-# 1. 显式定义根目录的跳转逻辑
-@app.get("/")
-async def root_to_index():
-    # 当用户访问 http://域名/ 时，自动 307 重定向到 http://域名/index
-    return RedirectResponse(url="/index")
+app = FastAPI(title="vLLM 智能控制台", root_path="/server_manager")
 
 # ---------------------------------------------------------------------------
 # 内部状态管理辅助工具
