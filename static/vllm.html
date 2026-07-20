@@ -64,33 +64,44 @@ function statusBadge(status) {
   return `<span class="badge b-${badgeClass}">${text}</span>`;
 }
 
-function gpuBarColor(util) {
-  if (util > 80) return '#ef4444';
-  if (util > 40) return '#f59e0b';
-  return '#3b82f6';
-}
-
+// ⚠️ 已修复：渲染函数使用行内防御，防止 CSS 样式冲突污染
 function renderGpus(serverId, gpus) {
-  if (!gpus) return '<div class="meta" style="color:#555;font-size:11px">GPU 未加载，点击刷新</div>';
+  if (!gpus) return '<div class="meta" style="color:#8c7b6c;font-size:11px">GPU 未加载，点击刷新</div>';
   if (gpus.length === 0) return '<div class="meta">GPU信息获取失败</div>';
   if (gpus[0] && gpus[0].error) return `<div class="meta">GPU查询出错: ${gpus[0].error}</div>`;
+
   if (!selectedGpus[serverId]) selectedGpus[serverId] = new Set();
+
   return gpus.map(g => {
-    const memPct = Math.round(g.mem_used_mb / g.mem_total_mb * 100);
+    const used = Number(g.mem_used_mb) || 0;
+    const total = Number(g.mem_total_mb) || 0;
+    const util = Number(g.util_pct) || 0;
+    const temp = g.temp_c !== undefined ? g.temp_c : '?';
+
+    const memPct = total > 0 ? Math.min(100, Math.max(0, Math.round(used / total * 100))) : 0;
     const checked = selectedGpus[serverId].has(g.index) ? 'checked' : '';
+
     const procText = g.processes && g.processes.length
-      ? g.processes.map(p => `pid${p.pid}:${p.mem_mb||'?'}MB`).join(', ')
+      ? g.processes.map(p => `pid${p.pid}:${p.mem_mb || '?'}MB`).join(', ')
       : '空闲';
+
     return `
-      <div class="gpu-row">
-        <input type="checkbox" data-server="${serverId}" data-gpu="${g.index}" ${checked} onchange="toggleGpu(this)">
-        <span style="width:32px">GPU${g.index}</span>
-        <div class="gpu-bar">
-          <div class="gpu-bar-fill" style="width:${memPct}%; background:${gpuBarColor(g.util_pct)}"></div>
-          <div class="gpu-bar-label">${g.mem_used_mb}/${g.mem_total_mb}MB · 利用率${g.util_pct}% · ${g.temp_c}°C</div>
+      <div style="display: flex; flex-direction: column; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+          <input type="checkbox" data-server="${serverId}" data-gpu="${g.index}" ${checked} onchange="toggleGpu(this)" style="width: auto !important; margin: 0; cursor: pointer; flex-shrink: 0;">
+          <span style="font-size: 12px; font-weight: 600; width: 38px; flex-shrink: 0; white-space: nowrap;">GPU${g.index}</span>
+
+          <div class="gpu-bar" style="flex: 1; position: relative; height: 18px; border-radius: 4px; overflow: hidden;">
+            <div class="gpu-bar-fill" style="width:${memPct}%; height: 100%; transition: width 0.3s ease;"></div>
+            <div class="gpu-bar-label" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; white-space: nowrap; pointer-events: none;">
+              ${used}/${total}MB (${memPct}%) · 利用率${util}% · ${temp}°C
+            </div>
+          </div>
+        </div>
+        <div class="gpu-procs" style="font-size: 10px; margin-left: 46px; margin-top: 2px;">
+          ${procText}
         </div>
       </div>
-      <div class="gpu-procs">${procText}</div>
     `;
   }).join('');
 }
@@ -102,14 +113,12 @@ function toggleGpu(el) {
   if (el.checked) selectedGpus[sid].add(idx); else selectedGpus[sid].delete(idx);
 }
 
-// 缓存选中的下拉列表位置
 function cacheForm(sid) {
   const select = document.getElementById(`model-select-${sid}`);
   if (!select) return;
   formCache[sid] = select.selectedIndex;
 }
 
-// 模型下拉框变动事件：实时刷纸面只读配置展示
 function onModelSelectChange(sid, idx, modelsJson) {
   formCache[sid] = parseInt(idx);
   const models = JSON.parse(decodeURIComponent(modelsJson));
@@ -139,7 +148,6 @@ async function refreshServers() {
   updateLogSelectOptions();
   render();
 
-  // 自动化智能轮询：检查当前激活的实例状态是否依旧是 stopped
   const activeServerId = cachedServers.active_server;
   const activeServer = cachedServers.servers.find(s => s.id === activeServerId);
   const isWaitingForOnline = activeServer && activeServer.status === 'stopped';
@@ -183,7 +191,6 @@ function handleSelectServerChange() {
 }
 
 function render() {
-  // 渲染前强制拦截保存一下当前的下拉框的选择位置，防重构时重置
   cachedServers.servers.forEach(s => {
     const el = document.getElementById(`model-select-${s.id}`);
     if (el) formCache[s.id] = el.selectedIndex;
@@ -193,7 +200,6 @@ function render() {
     const models = s.models || [];
     const savedIdx = formCache[s.id] !== undefined ? formCache[s.id] : 0;
 
-    // 生成动态下拉模板
     const optionsHtml = models.map((m, index) =>
       `<option value="${index}" ${index === savedIdx ? 'selected' : ''}>${m.name}</option>`
     ).join('');
@@ -303,13 +309,11 @@ async function startServer(sid) {
   const gpus = Array.from(selectedGpus[sid] || []);
   const customTp = parseInt(document.getElementById(`tp-input-${sid}`).value) || 1;
   const customPp = parseInt(document.getElementById(`pp-input-${sid}`).value) || 1;
-  // 联动：点击启动秒开日志监听，不管状态变没变绿
   startLogStream(sid);
   try {
     await api(`/server_manager/api/servers/${sid}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // 核心调整：发送被拉拉列表选中的 index 标志位和勾选的卡数组
       body: JSON.stringify({
         model_index: selectEl.selectedIndex,
         gpus: gpus,

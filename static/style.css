@@ -144,22 +144,35 @@ iframe {
   margin-bottom: 6px;
 }
 
-.gpu-row input {
+/* 显式重置 checkbox 宽度，防止任何外部污染 */
+.gpu-row input[type="checkbox"] {
+  width: auto;             /* ️ 强制恢复自适应宽度 */
+  margin: 0;
   transform: scale(1.1);
+  cursor: pointer;
+  flex-shrink: 0;          /* 防止被压缩 */
+}
+
+/* 确保 GPU 名字不被压缩也不换行 */
+.gpu-row span {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .gpu-bar {
-  flex: 1;
+  flex: 1;                 /* 占据剩余的横向空间 */
   background: #2a2e3a;
   border-radius: 4px;
-  height: 14px;
+  height: 18px;
   position: relative;
   overflow: hidden;
+  min-width: 100px;        /* ️ 增加保底最小宽度 */
 }
 
 .gpu-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  background: #3b82f6;
+  transition: width 0.3s ease;
 }
 
 .gpu-bar-label {
@@ -169,14 +182,18 @@ iframe {
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  color: #fff;
+  color: #ffffff;
+  font-weight: bold;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .gpu-procs {
   font-size: 10px;
   color: #777;
-  margin-left: 24px;
-  margin-bottom: 4px;
+  margin-left: 28px;       /* 稍微加大左边距，跟上方的进度条对齐 */
+  margin-bottom: 6px;
 }
 
 /* ===== 表单元素 ===== */
@@ -214,7 +231,7 @@ select.model-select,
   word-break: break-all;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
   width: 100%;
@@ -227,7 +244,6 @@ textarea {
   font-size: 13px;
   font-family: inherit;
 }
-
 textarea {
   resize: vertical;
   min-height: 80px;

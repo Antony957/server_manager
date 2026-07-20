@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 
-DB_PATH = "tasks.db"
+DB_PATH = "/root/data/tasks.db"
 
 
 def _now() -> str:
